@@ -1,10 +1,12 @@
+import io
 import re
+import requests
 import streamlit as st
 from google import genai
 from google.genai import types
 
 # -----------------------------------------------------------------------------
-# 1. Page Configuration & Setup
+# 1. Page Configuration
 # -----------------------------------------------------------------------------
 st.set_page_config(
     page_title="Franklin D. Roosevelt | Fireside Chat",
@@ -14,96 +16,100 @@ st.set_page_config(
 )
 
 # -----------------------------------------------------------------------------
-# 2. Secure API Key Retrieval
+# 2. Secure API Key
 # -----------------------------------------------------------------------------
 api_key = st.secrets.get("GEMINI_API_KEY")
 if not api_key:
-    st.error(
-        "**API Key Missing**: Please set `GEMINI_API_KEY` in `.streamlit/secrets.toml` "
-        "locally or in your Streamlit Community Cloud app settings."
-    )
+    st.error("API Key Missing: Please configure `GEMINI_API_KEY` in Streamlit secrets.")
     st.stop()
 
-# Initialize Google GenAI Client
 client = genai.Client(api_key=api_key)
 
 # -----------------------------------------------------------------------------
-# 3. Primary Source Visual Archive (Curated Maps, Photos & Artifacts)
+# 3. Robust Server-Side Image Loader (Bypasses 403 Hotlinking Blocks)
+# -----------------------------------------------------------------------------
+@st.cache_data(show_spinner=False, ttl=86400)
+def fetch_image_bytes(url: str):
+    """
+    Downloads image bytes on the server using an educational User-Agent.
+    Prevents browser hotlink blocking (HTTP 403 Forbidden) from Wikimedia/NARA.
+    """
+    headers = {
+        "User-Agent": "FDRHistoryClassroomBot/1.0 (Educational History Tool; contact@school.edu)"
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=8)
+        if response.status_code == 200:
+            return io.BytesIO(response.content)
+    except Exception:
+        pass
+    return None
+
+# -----------------------------------------------------------------------------
+# 4. Verified Archival Visual Catalog
 # -----------------------------------------------------------------------------
 VISUAL_ARCHIVE = {
     "fireside_photo": {
-        "title": "Photograph: First Fireside Chat (March 12, 1933)",
-        "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/05/FDR_fireside_chat_1933.jpg/800px-FDR_fireside_chat_1933.jpg",
-        "caption": "President Roosevelt addressing the nation on the banking crisis. (FDR Presidential Library / FRANKLIN Repository)",
-        "trigger": "Use when discussing the banking crisis, radio chats, the first hundred days, or speaking to the American people."
+        "title": "Photograph: FDR Delivering a Fireside Chat",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/5/51/FDR_Fireside_Chat_December_24%2C_1943.jpg",
+        "caption": "President Roosevelt broadcasting to the American public over radio microphones. (FDR Presidential Library)",
+        "trigger": "Use when discussing fireside chats, radio speeches, banking crisis, or speaking to the American people."
     },
     "dust_bowl_california": {
-        "title": "Photograph: Dust Bowl Migrants Arriving in California (1936)",
-        "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/5/54/Dust_Bowl_-_California_bound_1936.jpg/800px-Dust_Bowl_-_California_bound_1936.jpg",
-        "caption": "Refugees from the drought-stricken Southern Plains arriving in California along Highway 99. (Dorothea Lange / Library of Congress)",
-        "trigger": "Use when discussing the Dust Bowl, Okies, California farm labor, agriculture collapse, or migrant camps."
+        "title": "Photograph: Migrant Mother, Nipomo, California (1936)",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/b/bc/Migrant_Mother_%28LOC_fsa.8b29516%29.jpg",
+        "caption": "Dorothea Lange's iconic photograph of drought refugees in a California pea-pickers camp. (Library of Congress)",
+        "trigger": "Use when discussing the Dust Bowl, Okies, farming collapse, or migration to California."
     },
     "tva_map": {
-        "title": "Historical Map: Tennessee Valley Authority Regional System",
-        "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/cd/TVA_Illustration_1940.jpg/800px-TVA_Illustration_1940.jpg",
-        "caption": "Map of dams and public electrical development across the Tennessee River basin. (National Archives Catalog / NARA)",
-        "trigger": "Use when discussing the TVA, public power, dams, rural electrification, or regional planning."
+        "title": "Map: Tennessee Valley Authority Projects",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/e/eb/TVA-sites-map.png",
+        "caption": "Regional development map of dams and public electrical power sites. (National Archives Catalog)",
+        "trigger": "Use when discussing the TVA, dams, electricity, flood control, or regional development."
     },
     "ccc_workers": {
-        "title": "Photograph: Civilian Conservation Corps at Work",
-        "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/d/d3/CCC_workers_planting_seedlings.jpg/800px-CCC_workers_planting_seedlings.jpg",
-        "caption": "Young men planting trees to halt soil erosion under the Emergency Conservation Work Act. (National Archives / FRANKLIN Repository)",
-        "trigger": "Use when discussing the CCC, youth jobs, forestry, parks, soil conservation, or New Deal relief."
-    },
-    "court_packing": {
-        "title": "Political Cartoon: Judicial Reorganization Bill (1937)",
-        "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a2/Court_packing_cartoon_1937.jpg/800px-Court_packing_cartoon_1937.jpg",
-        "caption": "Editorial cartoon commenting on FDR's plan to reorganize the federal judiciary after Schechter Poultry. (Library of Congress)",
-        "trigger": "Use when discussing the Supreme Court, court packing, Schechter Poultry, unconstitutional New Deal acts, or 1937."
+        "title": "Photograph: Civilian Conservation Corps Crew",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/7/7b/Photograph_of_Civilian_Conservation_Corps_%28CCC%29_Planting_Crew_-_NARA_-_2129004.jpg",
+        "caption": "Young men planting pine seedlings to halt soil erosion under the New Deal. (National Archives Catalog)",
+        "trigger": "Use when discussing the CCC, youth jobs, forestry, soil conservation, or relief programs."
     },
     "infamy_speech": {
-        "title": "Archival Document: Annotated Pearl Harbor Address (Dec 8, 1941)",
-        "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a9/FDR%27s_%22Day_of_Infamy%22_address_page_1.jpg/800px-FDR%27s_%22Day_of_Infamy%22_address_page_1.jpg",
-        "caption": "FDR's reading copy with handwritten revisions changing 'a date which will live in world history' to 'infamy'. (FDR Presidential Library)",
-        "trigger": "Use when discussing Pearl Harbor, December 7, 1941, declarations of war, or the address to Congress."
+        "title": "Document: Draft of the 'Day of Infamy' Address (Dec 8, 1941)",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/d/df/Day-of-infamy-draft1-page1.jpg",
+        "caption": "FDR's annotated typed copy with handwritten edits declaring war on Japan. (National Archives / FDR Library)",
+        "trigger": "Use when discussing Pearl Harbor, December 7, 1941, war declarations, or Congress."
     },
-    "executive_order_9066": {
-        "title": "Official Document: Executive Order 9066 (Feb 19, 1942)",
-        "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/eb/Executive_Order_9066.jpg/800px-Executive_Order_9066.jpg",
-        "caption": "Presidential executive order authorizing military exclusion zones and Japanese American relocation. (National Archives Catalog)",
-        "trigger": "Use when discussing Japanese American internment, Manzanar, California exclusion zones, or Korematsu v. United States."
+    "order_9066": {
+        "title": "Document: Civilian Exclusion Order (Executive Order 9066)",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/0/02/Instructions_to_japanese.png",
+        "caption": "Western Defense Command instructions posted in California ordering the relocation of Japanese Americans. (NARA)",
+        "trigger": "Use when discussing Japanese American internment, Executive Order 9066, Manzanar, or Korematsu v. United States."
     },
     "pacific_theater_map": {
-        "title": "Military Map: Pacific Ocean Areas & Allied Operations",
-        "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0a/Pacific_Area_-_World_War_II.jpg/800px-Pacific_Area_-_World_War_II.jpg",
-        "caption": "Strategy map of Allied naval and ground commands across the Pacific Theater. (Office of the Historian, FRUS)",
-        "trigger": "Use when discussing the war in the Pacific, naval battles, island hopping, Midway, or General MacArthur and Admiral Nimitz."
+        "title": "Map: Pacific Ocean Theater of World War II",
+        "url": "https://upload.wikimedia.org/wikipedia/commons/0/0a/Pacific_Area_-_World_War_II.jpg",
+        "caption": "Allied Command operational zones in the Pacific war. (Office of the Historian, FRUS)",
+        "trigger": "Use when discussing the Pacific war, Midway, island-hopping, or naval operations."
     }
 }
 
 # -----------------------------------------------------------------------------
-# 4. FDR System Instructions
+# 5. System Instructions
 # -----------------------------------------------------------------------------
-image_options_prompt = "\n".join(
-    [f"- [IMAGE: {k}] -> {v['trigger']}" for k, v in VISUAL_ARCHIVE.items()]
-)
+image_triggers = "\n".join([f"- [IMAGE: {k}] -> {v['trigger']}" for k, v in VISUAL_ARCHIVE.items()])
 
 SYSTEM_INSTRUCTION = f"""
 You are Franklin Delano Roosevelt (FDR), 32nd President of the United States.
 You are conversing with a California 10th-grade high school history student.
 
-Voice, Reading Level & Tone:
-1. Speak in your authentic fireside chat voice ("My friends...", "Let us be clear...", "As I told Congress...").
-2. Match a California 10th-grade high school reading level: direct, dignified, inspiring, and plain-spoken without overly dense Victorian phrasing.
-3. Length Constraint: Your entire spoken response MUST BE BETWEEN A MINIMUM OF 15 WORDS AND A MAXIMUM OF 120 WORDS. Never speak less than 15 words and never exceed 120 words.
+Voice & Reading Level:
+1. Speak in your warm, reassuring fireside chat cadence ("My friends...", "Let us be clear...").
+2. Match a 10th-grade reading level: clear, direct, articulate, and historically accurate.
+3. Length: Strictly BETWEEN 15 AND 120 WORDS. Never speak fewer than 15 words and never exceed 120 words.
 
-Historical Evidence & Source Grounding:
-1. Base your knowledge strictly on historical primary and secondary sources:
-   - Letters written by you or to you (correspondence with Eleanor Roosevelt, Winston Churchill, everyday California citizens).
-   - Official government documents, executive orders (e.g., Executive Order 8802, 9066), and legislation (NIRA, Social Security Act, TVA Act, CCC, Lend-Lease).
-   - Supreme Court rulings (Schechter Poultry Corp. v. United States, Korematsu v. United States).
-   - Speeches (Inaugurals, Four Freedoms, Day of Infamy, Fireside Chats).
-2. Archive Citation Requirement: Every single answer MUST conclude with a specific archival source citation in parentheses at the very end of your answer, citing one of these exact repositories:
+Historical Evidence & Citations:
+1. Ground answers in primary sources: your letters, congressional legislation (CCC, TVA, Social Security, WPA), Supreme Court cases (Schechter Poultry, Korematsu), and presidential speeches.
+2. Every answer MUST conclude with a source citation in parentheses at the end from one of these repositories:
    - (FDR Presidential Library & Museum, FRANKLIN Repository)
    - (Library of Congress, FDR Resource Guide)
    - (National Archives Catalog)
@@ -113,20 +119,35 @@ Historical Evidence & Source Grounding:
    - (Internet Archive, FDR Collections)
    - (FDR Library Museum Artifact Collection)
 
-Visual Aid Selection:
-When discussing a topic with a matching artifact or map, place the exact image tag at the very end of your response (after your citation):
-{image_options_prompt}
-Only include an image tag when directly relevant to the student's question.
+Visual Aids:
+When discussing a topic with a matching photo or map, place the exact tag at the very end of your response:
+{image_triggers}
+Only include one tag when directly helpful.
 """
 
 # -----------------------------------------------------------------------------
-# 5. Session State & Memory Initialization (Previous 6 Questions)
+# 6. Memory & Session State
 # -----------------------------------------------------------------------------
 if "history" not in st.session_state:
     st.session_state.history = []
 
+def display_media(image_key: str):
+    """Safely loads and renders media bytes into the Streamlit chat."""
+    if image_key and image_key in VISUAL_ARCHIVE:
+        item = VISUAL_ARCHIVE[image_key]
+        img_bytes = fetch_image_bytes(item["url"])
+        if img_bytes:
+            st.image(
+                img_bytes,
+                caption=f"{item['title']} — {item['caption']}",
+                use_container_width=True
+            )
+        else:
+            # Fallback if network drops
+            st.caption(f"📁 **Archival Record**: [{item['title']}]({item['url']}) — {item['caption']}")
+
 # -----------------------------------------------------------------------------
-# 6. Sidebar (Classroom Metadata & Controls)
+# 7. Sidebar
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.image(
@@ -136,62 +157,39 @@ with st.sidebar:
     )
     st.title("FDR Fireside Desk")
     st.markdown("""
-    **Curriculum**: California 10th Grade U.S. & World History  
+    **Audience**: California 10th Grade  
     **Model**: `gemini-3.5-flash-lite`  
     **Temperature**: `0.3`  
-    **Response Limit**: 15–120 words  
-    **Memory Scope**: Previous 6 questions  
+    **Memory Window**: 6 previous questions  
+    **Length**: 15–120 words  
     """)
-    st.divider()
-    st.markdown("**Designated Archival Repositories:**")
-    st.caption("""
-    • FRANKLIN Repository (FDR Library)  
-    • Library of Congress (LOC)  
-    • National Archives & Records Admin (NARA)  
-    • The American Presidency Project (UCSB)  
-    • Office of the Historian (FRUS)  
-    • Eleanor Roosevelt Papers Project (GWU)  
-    • Internet Archive (FedFlix)  
-    """)
-    st.divider()
-    if st.button("Clear Wire / Start Over", use_container_width=True):
+    if st.button("Reset Conversation", use_container_width=True):
         st.session_state.history = []
         st.rerun()
 
 # -----------------------------------------------------------------------------
-# 7. Main Chat UI & Historic Turns
+# 8. Chat Interface
 # -----------------------------------------------------------------------------
 st.title("🎙️ A Fireside Chat with FDR")
-st.markdown(
-    "*Welcome to the Executive Office. Ask President Roosevelt about the Great Depression, "
-    "the New Deal, California during the 1930s-1940s, or World War II.*"
-)
+st.markdown("*Ask President Roosevelt about the New Deal, California in the 1930s, or World War II.*")
 
-# Render prior conversation turns
+# Render previous turns
 for turn in st.session_state.history:
     with st.chat_message("user"):
         st.markdown(turn["question"])
     with st.chat_message("assistant"):
         st.markdown(turn["clean_answer"])
-        if turn.get("image_key") and turn["image_key"] in VISUAL_ARCHIVE:
-            media = VISUAL_ARCHIVE[turn["image_key"]]
-            st.image(
-                media["url"],
-                caption=f"{media['title']} — {media['caption']}",
-                use_container_width=True
-            )
+        if turn.get("image_key"):
+            display_media(turn["image_key"])
 
-# -----------------------------------------------------------------------------
-# 8. User Interaction & Gemini Query Pipeline
-# -----------------------------------------------------------------------------
+# Handle Input
 user_input = st.chat_input("Ask Mr. President a question...")
 
 if user_input:
-    # Display the user's question immediately
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    # Restrict memory payload: Last 5 turns + current question = exactly 6 questions in context
+    # Rolling memory: Last 5 turns + current question = 6 questions in context
     recent_turns = st.session_state.history[-5:]
     contents_payload = []
     for past in recent_turns:
@@ -199,7 +197,6 @@ if user_input:
         contents_payload.append(past["raw_answer"])
     contents_payload.append(user_input)
 
-    # Call Gemini 3.5 Flash-Lite at 0.3 Temperature
     try:
         response = client.models.generate_content(
             model="gemini-3.5-flash-lite",
@@ -211,30 +208,20 @@ if user_input:
         )
         raw_reply = response.text.strip()
     except Exception as e:
-        raw_reply = (
-            f"My friends, the telegraph wires have suffered an unexpected disruption: {str(e)}. "
-            "(National Archives Catalog)"
-        )
+        raw_reply = f"My friends, the wireless communication has encountered a fault: {str(e)} (National Archives Catalog)"
 
-    # Parse and extract image tags: [IMAGE: key_name]
+    # Extract [IMAGE: key] tags
     image_match = re.search(r"\[IMAGE:\s*([a-zA-Z0-9_]+)\]", raw_reply)
     image_key = image_match.group(1) if image_match else None
-
-    # Clean the response text so raw tags are not displayed to students
     clean_reply = re.sub(r"\[IMAGE:\s*[a-zA-Z0-9_]+\]", "", raw_reply).strip()
 
-    # Render FDR's response & historical media
+    # Render response
     with st.chat_message("assistant"):
         st.markdown(clean_reply)
-        if image_key and image_key in VISUAL_ARCHIVE:
-            media = VISUAL_ARCHIVE[image_key]
-            st.image(
-                media["url"],
-                caption=f"{media['title']} — {media['caption']}",
-                use_container_width=True
-            )
+        if image_key:
+            display_media(image_key)
 
-    # Save turn to session state
+    # Save to history
     st.session_state.history.append({
         "question": user_input,
         "raw_answer": raw_reply,
@@ -242,6 +229,6 @@ if user_input:
         "image_key": image_key
     })
 
-    # Strict truncation: ensure only the previous 6 questions are kept in memory
+    # Keep memory capped at 6 questions
     if len(st.session_state.history) > 6:
         st.session_state.history = st.session_state.history[-6:]
